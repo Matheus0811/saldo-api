@@ -1,0 +1,30 @@
+# Sobe a API com um PostgreSQL de verdade:  docker compose up --build
+# API: http://localhost:3333  |  Documentação: http://localhost:3333/docs
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: saldo
+      POSTGRES_PASSWORD: saldo
+      POSTGRES_DB: saldo
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U saldo"]
+      interval: 5s
+      retries: 10
+
+  api:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://saldo:saldo@db:5432/saldo
+      JWT_SECRET: troque-esta-chave-por-uma-longa-e-aleatoria-em-producao
+      SEED_DEMO: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "3333:3333"
+
+volumes:
+  pgdata:
