@@ -4,8 +4,8 @@
  * Para rodar localmente use `npm run dev`, que sobe o servidor em src/main.ts.
  */
 import cors from 'cors';
-import express, { Router } from 'express';
-import helmet from 'helmet';
+import express, { Router, type RequestHandler } from 'express';
+import helmetModule from 'helmet';
 
 import { ready } from './db/client.js';
 import { docsPage, homePage } from './docs/pages.js';
@@ -19,6 +19,12 @@ import { categoriesRouter } from './modules/categories/categories.routes.js';
 import { goalsRouter } from './modules/goals/goals.routes.js';
 import { reportsRouter } from './modules/reports/reports.routes.js';
 import { transactionsRouter, transfersRouter } from './modules/transactions/transactions.routes.js';
+
+// O compilador da Vercel lê os tipos do helmet no formato CommonJS, onde o import padrão vira o
+// módulo inteiro. Este ajuste funciona nos dois formatos (local e Vercel).
+type HelmetFn = (options?: { contentSecurityPolicy?: boolean }) => RequestHandler;
+const helmetExport = helmetModule as unknown as HelmetFn & { default?: HelmetFn };
+const helmet: HelmetFn = helmetExport.default ?? helmetExport;
 
 const app = express();
 
