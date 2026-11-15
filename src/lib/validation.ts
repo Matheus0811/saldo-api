@@ -1,39 +1,39 @@
-import { z, type ZodTypeAny } from 'zod';
+import { z } from 'zod';
 
 import { unprocessable } from './errors.js';
 
-// Mensagens de validação em português.
-z.setErrorMap((issue, ctx) => {
-  switch (issue.code) {
-    case z.ZodIssueCode.invalid_type:
-      return {
-        message: issue.received === 'undefined' ? 'Campo obrigatório.' : `Tipo inválido: esperado ${issue.expected}.`,
-      };
-    case z.ZodIssueCode.too_small:
-      if (issue.type === 'string') return { message: `Use pelo menos ${issue.minimum} caractere(s).` };
-      if (issue.type === 'array') return { message: `Informe pelo menos ${issue.minimum} item(ns).` };
-      return { message: `O valor deve ser no mínimo ${issue.minimum}.` };
-    case z.ZodIssueCode.too_big:
-      if (issue.type === 'string') return { message: `Use no máximo ${issue.maximum} caracteres.` };
-      return { message: `O valor deve ser no máximo ${issue.maximum}.` };
-    case z.ZodIssueCode.invalid_string:
-      if (issue.validation === 'email') return { message: 'E-mail inválido.' };
-      return { message: 'Formato inválido.' };
-    case z.ZodIssueCode.invalid_enum_value:
-      return { message: `Valor inválido. Use um destes: ${issue.options.join(', ')}.` };
-    case z.ZodIssueCode.unrecognized_keys:
-      return { message: `Campo(s) não permitido(s): ${issue.keys.join(', ')}.` };
-    default:
-      return { message: ctx.defaultError };
-  }
+// Mensagens de validação em português (Zod 4). Mensagens definidas no próprio schema têm prioridade.
+z.config({
+  customError: (raw) => {
+    const issue = raw as unknown as Record<string, any>;
+    switch (issue.code) {
+      case 'invalid_type':
+        return issue.input === undefined ? 'Campo obrigatório.' : `Tipo inválido: esperado ${issue.expected}.`;
+      case 'too_small':
+        if (issue.origin === 'string') return `Use pelo menos ${issue.minimum} caractere(s).`;
+        if (issue.origin === 'array') return `Informe pelo menos ${issue.minimum} item(ns).`;
+        return `O valor deve ser no mínimo ${issue.minimum}.`;
+      case 'too_big':
+        if (issue.origin === 'string') return `Use no máximo ${issue.maximum} caracteres.`;
+        return `O valor deve ser no máximo ${issue.maximum}.`;
+      case 'invalid_format':
+        return issue.format === 'email' ? 'E-mail inválido.' : 'Formato inválido.';
+      case 'invalid_value':
+        return `Valor inválido. Use um destes: ${(issue.values as unknown[]).join(', ')}.`;
+      case 'unrecognized_keys':
+        return `Campo(s) não permitido(s): ${(issue.keys as string[]).join(', ')}.`;
+      default:
+        return undefined;
+    }
+  },
 });
 
 /** Valida `data` com o schema; em caso de erro lança 422 com a lista de campos inválidos. */
-export function parse<T extends ZodTypeAny>(schema: T, data: unknown): z.infer<T> {
+export function parse<T extends z.ZodType>(schema: T, data: unknown): z.output<T> {
   const result = schema.safeParse(data);
   if (!result.success) {
     const details = result.error.issues.map((issue) => ({
-      field: issue.path.join('.') || null,
+      field: issue.path.map(String).join('.') || null,
       message: issue.message,
     }));
     throw unprocessable('Dados inválidos. Confira os campos destacados.', details);
