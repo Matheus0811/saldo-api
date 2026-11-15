@@ -30,15 +30,22 @@ async function connect(): Promise<{ db: Database; runner: SqlRunner }> {
       async withLock(fn) {
         const client = await pool.connect();
         try {
-          await client.query(`SELECT pg_advisory_lock(${MIGRATION_LOCK_ID})`);
-          return await fn({
+          // Trava de transação (pg_advisory_xact_lock): é liberada sozinha no COMMIT/ROLLBACK e
+          // funciona também atrás de poolers como o PgBouncer do Neon, ao contrário da trava de sessão.
+          await client.query('BEGIN');
+          await client.query(`SELECT pg_advisory_xact_lock(${MIGRATION_LOCK_ID})`);
+          const result = await fn({
             exec: async (sql) => {
               await client.query(sql);
             },
             rows: async (sql) => (await client.query(sql)).rows,
           });
+          await client.query('COMMIT');
+          return result;
+        } catch (error) {
+          await client.query('ROLLBACK').catch(() => undefined);
+          throw error;
         } finally {
-          await client.query(`SELECT pg_advisory_unlock(${MIGRATION_LOCK_ID})`).catch(() => undefined);
           client.release();
         }
       },
@@ -49,13 +56,23 @@ async function connect(): Promise<{ db: Database; runner: SqlRunner }> {
   if (env.NODE_ENV !== 'test') mkdirSync(env.PGLITE_DIR, { recursive: true });
   const client = env.NODE_ENV === 'test' ? new PGlite() : new PGlite(env.PGLITE_DIR);
   const runner: SqlRunner = {
-    withLock: (fn) =>
-      fn({
-        exec: async (sql) => {
-          await client.exec(sql);
-        },
-        rows: async (sql) => (await client.query<Record<string, unknown>>(sql)).rows,
-      }),
+    async withLock(fn) {
+      // PGlite tem uma conexão só, então a transação já garante a exclusividade.
+      await client.exec('BEGIN');
+      try {
+        const result = await fn({
+          exec: async (sql) => {
+            await client.exec(sql);
+          },
+          rows: async (sql) => (await client.query<Record<string, unknown>>(sql)).rows,
+        });
+        await client.exec('COMMIT');
+        return result;
+      } catch (error) {
+        await client.exec('ROLLBACK').catch(() => undefined);
+        throw error;
+      }
+    },
   };
   // PGlite e node-postgres expõem a mesma API do Drizzle para PostgreSQL.
   return { db: drizzlePglite({ client, schema }) as unknown as Database, runner };

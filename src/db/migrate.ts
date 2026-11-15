@@ -6,7 +6,10 @@ export interface SqlExecutor {
 }
 
 export interface SqlRunner {
-  /** Executa `fn` com exclusividade (evita duas instâncias migrando ao mesmo tempo). */
+  /**
+   * Executa `fn` dentro de uma única transação e com exclusividade (evita duas instâncias migrando
+   * ao mesmo tempo). Se `fn` falhar, a transação inteira é desfeita.
+   */
   withLock<T>(fn: (executor: SqlExecutor) => Promise<T>): Promise<T>;
 }
 
@@ -21,14 +24,8 @@ export async function runMigrations(runner: SqlRunner): Promise<string[]> {
     const done: string[] = [];
     for (const migration of migrations) {
       if (applied.has(migration.name)) continue;
-      try {
-        await db.exec(
-          `BEGIN;\n${migration.sql}\nINSERT INTO schema_migrations (name) VALUES ('${migration.name}');\nCOMMIT;`,
-        );
-      } catch (error) {
-        await db.exec('ROLLBACK').catch(() => undefined);
-        throw error;
-      }
+      // Tudo roda na transação aberta pelo runner: se algo falhar, nada fica pela metade.
+      await db.exec(`${migration.sql}\nINSERT INTO schema_migrations (name) VALUES ('${migration.name}');`);
       done.push(migration.name);
     }
     return done;
