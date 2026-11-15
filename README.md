@@ -116,7 +116,7 @@ npm install
 npm run dev          # http://localhost:3333/docs
 ```
 
-A conta de demonstração é criada automaticamente (`SEED_DEMO=true` no `.env`). Para recriá-la: `npm run seed`.
+A conta de demonstração é criada automaticamente (`SEED_DEMO=true` no `.env`) e se renova a cada 24 horas, com as datas acompanhando o mês atual. Para recriá-la na hora: `npm run seed`.
 
 **Com Docker e PostgreSQL:**
 

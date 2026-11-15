@@ -19,6 +19,12 @@ describe('conta de demonstração', () => {
     expect(summary.status).toBe(200);
     expect(summary.body.incomeCents).toBeGreaterThan(0);
 
+    // Só o cartão de crédito pode ficar negativo (é a fatura em aberto).
+    const accounts = await api().get('/api/accounts').set(auth);
+    for (const account of accounts.body as { type: string; balanceCents: number }[]) {
+      if (account.type !== 'credit_card') expect(account.balanceCents).toBeGreaterThanOrEqual(0);
+    }
+
     const budgets = await api().get('/api/budgets').set(auth);
     expect(budgets.body.budgets).toHaveLength(5);
 

@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { eq } from 'drizzle-orm';
 
-import { addDays, addMonths, currentMonth, monthRange, shiftMonth, today } from '../lib/dates.js';
+import { addMonths, currentMonth, monthRange, shiftMonth, today } from '../lib/dates.js';
 import { splitInstallments } from '../lib/money.js';
 import { DEFAULT_CATEGORIES } from '../modules/categories/default-categories.js';
 import { getDb } from './client.js';
@@ -15,6 +15,9 @@ import { accounts, budgets, categories, goals, transactions, users, type NewTran
 
 export const DEMO_EMAIL = 'demo@saldo.dev';
 export const DEMO_PASSWORD = 'demo123';
+
+/** Fatura do cartão que já estava em aberto antes do primeiro mês da demo. */
+const OPENING_CARD_BILL = 185_000;
 
 /** Gerador pseudoaleatório com semente: a demo sai igual toda vez. */
 function random(seed: number) {
@@ -49,7 +52,7 @@ export async function seedDemo(): Promise<{ transactions: number }> {
     .values([
       { userId, name: 'Conta corrente', type: 'checking' as const, initialBalanceCents: 185_000, color: '#7C3AED' },
       { userId, name: 'Carteira', type: 'wallet' as const, initialBalanceCents: 12_000, color: '#16A34A' },
-      { userId, name: 'Cartão de crédito', type: 'credit_card' as const, initialBalanceCents: 0, color: '#F97316' },
+      { userId, name: 'Cartão de crédito', type: 'credit_card' as const, initialBalanceCents: -OPENING_CARD_BILL, color: '#F97316' },
       { userId, name: 'Investimentos', type: 'investment' as const, initialBalanceCents: 350_000, color: '#0EA5E9' },
     ])
     .returning();
@@ -84,81 +87,7 @@ export async function seedDemo(): Promise<{ transactions: number }> {
     });
   };
 
-  for (let offset = -5; offset <= 0; offset += 1) {
-    const month = shiftMonth(thisMonth, offset);
-
-    add(month, 5, 'income', 420_000, 'Salário', 'Salário');
-    if (offset % 2 === 0) add(month, between(12, 20), 'income', between(60_000, 140_000), 'Projeto freelance de site', 'Freelance');
-    add(month, 28, 'income', between(1_800, 2_600), 'Rendimento da reserva', 'Rendimentos', 'Investimentos');
-
-    add(month, 10, 'expense', 120_000, 'Aluguel', 'Moradia');
-    add(month, 12, 'expense', between(14_000, 21_000), 'Conta de luz', 'Contas de casa');
-    add(month, 12, 'expense', 9_990, 'Internet fibra', 'Contas de casa');
-    add(month, 15, 'expense', 65_000, 'Mensalidade da faculdade', 'Educação');
-    add(month, 8, 'expense', 5_590, 'Streaming de vídeo', 'Assinaturas', 'Cartão de crédito');
-    add(month, 8, 'expense', 2_190, 'Streaming de música', 'Assinaturas', 'Cartão de crédito');
-    add(month, 20, 'expense', 9_900, 'Academia', 'Saúde', 'Cartão de crédito');
-
-    for (const week of [3, 10, 17, 24]) {
-      add(month, week, 'expense', between(16_000, 32_000), 'Compras do mês no mercado', 'Mercado', 'Cartão de crédito');
-    }
-    for (let i = 0; i < between(3, 6); i += 1) {
-      const places = ['Almoço no restaurante', 'Pizza com amigos', 'Lanche', 'Delivery de comida japonesa', 'Padaria'];
-      add(month, between(1, 28), 'expense', between(2_500, 11_000), places[between(0, places.length - 1)], 'Restaurantes', 'Cartão de crédito');
-    }
-    for (let i = 0; i < between(4, 7); i += 1) {
-      const rides = ['Corrida de aplicativo', 'Combustível', 'Recarga do cartão de transporte'];
-      add(month, between(1, 28), 'expense', between(1_800, 16_000), rides[between(0, rides.length - 1)], 'Transporte', i % 3 === 0 ? 'Carteira' : 'Cartão de crédito');
-    }
-    if (rand() > 0.4) add(month, between(5, 27), 'expense', between(4_000, 18_000), 'Cinema e passeio', 'Lazer', 'Carteira');
-    if (rand() > 0.6) add(month, between(5, 27), 'expense', between(3_500, 15_000), 'Farmácia', 'Saúde');
-
-    // Pagamento da fatura do cartão (transferência da conta corrente para o cartão).
-    const group = randomUUID();
-    const invoiceDate = `${month}-07`;
-    for (const [type, account] of [
-      ['expense', 'Conta corrente'],
-      ['income', 'Cartão de crédito'],
-    ] as const) {
-      rows.push({
-        userId,
-        type,
-        amountCents: between(160_000, 210_000),
-        description: 'Pagamento da fatura do cartão',
-        date: invoiceDate,
-        accountId: acc(account),
-        categoryId: null,
-        paid: invoiceDate <= todayStr,
-        isTransfer: true,
-        transferGroup: group,
-      });
-    }
-    // As duas pontas da transferência precisam ter o mesmo valor.
-    rows[rows.length - 1].amountCents = rows[rows.length - 2].amountCents;
-
-    // Todo mês guarda um pouco nos investimentos.
-    const saveGroup = randomUUID();
-    const saveDate = `${month}-06`;
-    for (const [type, account] of [
-      ['expense', 'Conta corrente'],
-      ['income', 'Investimentos'],
-    ] as const) {
-      rows.push({
-        userId,
-        type,
-        amountCents: 50_000,
-        description: 'Aporte na reserva de emergência',
-        date: saveDate,
-        accountId: acc(account),
-        categoryId: null,
-        paid: saveDate <= todayStr,
-        isTransfer: true,
-        transferGroup: saveGroup,
-      });
-    }
-  }
-
-  // Uma compra parcelada em 10x que começou há 3 meses.
+  // Uma compra parcelada em 10x no cartão que começou há 3 meses (entra nas faturas).
   const installmentGroup = randomUUID();
   const firstDate = addMonths(`${shiftMonth(thisMonth, -3)}-14`, 0);
   splitInstallments(389_900, 10).forEach((amountCents, index) => {
@@ -178,11 +107,77 @@ export async function seedDemo(): Promise<{ transactions: number }> {
     });
   });
 
-  // Algumas contas a pagar nos próximos dias.
-  add(shiftMonth(thisMonth, 1), 10, 'expense', 120_000, 'Aluguel', 'Moradia', 'Conta corrente', {
-    date: addDays(todayStr, 9),
-    paid: false,
-  });
+  /** Transferência entre contas: uma saída e uma entrada com o mesmo valor, fora dos relatórios. */
+  const addTransfer = (date: string, amountCents: number, description: string, from: string, to: string) => {
+    const transferGroup = randomUUID();
+    for (const [type, account] of [
+      ['expense', from],
+      ['income', to],
+    ] as const) {
+      rows.push({
+        userId,
+        type,
+        amountCents,
+        description,
+        date,
+        accountId: acc(account),
+        categoryId: null,
+        paid: date <= todayStr,
+        isTransfer: true,
+        transferGroup,
+      });
+    }
+  };
+
+  for (let offset = -5; offset <= 0; offset += 1) {
+    const month = shiftMonth(thisMonth, offset);
+
+    add(month, 5, 'income', 520_000, 'Salário', 'Salário');
+    if (offset % 2 === 0) add(month, between(12, 20), 'income', between(60_000, 140_000), 'Projeto freelance de site', 'Freelance');
+    add(month, 28, 'income', between(1_800, 2_600), 'Rendimento da reserva', 'Rendimentos', 'Investimentos');
+
+    add(month, 10, 'expense', 120_000, 'Aluguel', 'Moradia');
+    add(month, 12, 'expense', between(14_000, 21_000), 'Conta de luz', 'Contas de casa');
+    add(month, 12, 'expense', 9_990, 'Internet fibra', 'Contas de casa');
+    add(month, 15, 'expense', 65_000, 'Mensalidade da faculdade', 'Educação');
+    add(month, 8, 'expense', 5_590, 'Streaming de vídeo', 'Assinaturas', 'Cartão de crédito');
+    add(month, 8, 'expense', 2_190, 'Streaming de música', 'Assinaturas', 'Cartão de crédito');
+    add(month, 20, 'expense', 9_900, 'Academia', 'Saúde', 'Cartão de crédito');
+
+    for (const week of [3, 10, 17, 24]) {
+      add(month, week, 'expense', between(15_000, 26_000), 'Compras do mês no mercado', 'Mercado', 'Cartão de crédito');
+    }
+    for (let i = 0; i < between(3, 6); i += 1) {
+      const places = ['Almoço no restaurante', 'Pizza com amigos', 'Lanche', 'Delivery de comida japonesa', 'Padaria'];
+      add(month, between(1, 28), 'expense', between(2_500, 11_000), places[between(0, places.length - 1)], 'Restaurantes', 'Cartão de crédito');
+    }
+    for (let i = 0; i < between(4, 7); i += 1) {
+      const rides = ['Corrida de aplicativo', 'Combustível', 'Recarga do cartão de transporte'];
+      add(month, between(1, 28), 'expense', between(1_800, 12_000), rides[between(0, rides.length - 1)], 'Transporte', i % 3 === 0 ? 'Carteira' : 'Cartão de crédito');
+    }
+    if (rand() > 0.4) add(month, between(5, 27), 'expense', between(4_000, 18_000), 'Cinema e passeio', 'Lazer', 'Carteira');
+    if (rand() > 0.6) add(month, between(5, 27), 'expense', between(3_500, 15_000), 'Farmácia', 'Saúde');
+
+    // Pagamento da fatura (dia 7): quita exatamente o que foi gasto no cartão no mês anterior.
+    const previousMonth = shiftMonth(month, -1);
+    const cardId = acc('Cartão de crédito');
+    const billCents =
+      offset === -5
+        ? OPENING_CARD_BILL
+        : rows
+            .filter((row) => row.accountId === cardId && row.type === 'expense' && row.date.startsWith(previousMonth))
+            .reduce((total, row) => total + row.amountCents, 0);
+    addTransfer(`${month}-07`, billCents, 'Pagamento da fatura do cartão', 'Conta corrente', 'Cartão de crédito');
+
+    // Saque para os gastos em dinheiro.
+    addTransfer(`${month}-02`, 25_000, 'Saque para a carteira', 'Conta corrente', 'Carteira');
+
+    // Todo mês guarda um pouco nos investimentos.
+    addTransfer(`${month}-06`, 50_000, 'Aporte na reserva de emergência', 'Conta corrente', 'Investimentos');
+  }
+
+  // Conta a pagar já lançada para o mês que vem.
+  add(shiftMonth(thisMonth, 1), 10, 'expense', 120_000, 'Aluguel', 'Moradia');
 
   await db.insert(transactions).values(rows);
 
@@ -210,8 +205,20 @@ export async function seedDemo(): Promise<{ transactions: number }> {
   return { transactions: rows.length };
 }
 
-/** Cria a demo apenas se ela ainda não existir (usado ao iniciar com SEED_DEMO=true). */
-export async function seedDemoIfMissing(): Promise<void> {
-  const [existing] = await getDb().select({ id: users.id }).from(users).where(eq(users.email, DEMO_EMAIL)).limit(1);
-  if (!existing) await seedDemo();
+/** Ao mudar os dados da demo, atualize esta data: a demo que já existe no banco é recriada. */
+const DEMO_CHANGED_AT = new Date('2026-11-15T04:30:00Z');
+/** A demo se renova a cada 24 horas: as datas acompanham o mês atual e o que visitantes mudaram some. */
+const DEMO_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/** Cria a demo se ela não existir, ou recria se estiver desatualizada (usado ao iniciar com SEED_DEMO=true). */
+export async function refreshDemoIfNeeded(): Promise<void> {
+  const [existing] = await getDb()
+    .select({ createdAt: users.createdAt })
+    .from(users)
+    .where(eq(users.email, DEMO_EMAIL))
+    .limit(1);
+  const outdated =
+    existing !== undefined &&
+    (existing.createdAt.getTime() < DEMO_CHANGED_AT.getTime() || Date.now() - existing.createdAt.getTime() > DEMO_MAX_AGE_MS);
+  if (!existing || outdated) await seedDemo();
 }

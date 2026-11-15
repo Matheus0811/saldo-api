@@ -86,9 +86,9 @@ export function ready(): Promise<Database> {
       await runMigrations(runner);
       database = db;
       if (env.SEED_DEMO) {
-        const { seedDemoIfMissing } = await import('./seed.js');
+        const { refreshDemoIfNeeded } = await import('./seed.js');
         // Se duas instâncias tentarem criar a demo ao mesmo tempo, uma falha e tudo bem.
-        await seedDemoIfMissing().catch((error) => console.warn('Demo não criada nesta instância:', error?.message));
+        await refreshDemoIfNeeded().catch((error) => console.warn('Demo não criada nesta instância:', error?.message));
       }
       return db;
     })().catch((error) => {
